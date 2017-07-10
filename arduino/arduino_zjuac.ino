@@ -1,155 +1,122 @@
 /* ---------------------------------------------------------------------------
-# Licensing Information: You are free to use or extend these projects for
-# education or reserach purposes provided that (1) you retain this notice
-# and (2) you provide clear attribution to UC Berkeley, including a link
-# to http://barc-project.com
-#
-# Attibution Information: The barc project ROS code-base was developed
-# at UC Berkeley in the Model Predictive Control (MPC) lab by Jon Gonzales
-# (jon.gonzales@berkeley.edu)  Development of the web-server app Dator was
-# based on an open source project by Bruce Wootton, with contributions from
-# Kiet Lam (kiet.lam@berkeley.edu). The RC Input code was based on sample code
-# from http://rcarduino.blogspot.com/2012/04/how-to-read-multiple-rc-channels-draft.html
-# --------------------------------------------------------------------------- */
+ # Licensing Information: You are free to use or extend these projects for
+ # education or reserach purposes provided that (1) you retain this notice
+ # and (2) you provide clear attribution to UC Berkeley, including a link
+ # to http://barc-project.com
+ #
+ # Attibution Information: The barc project ROS code-base was developed
+ # at UC Berkeley in the Model Predictive Control (MPC) lab by Jon Gonzales
+ # (jon.gonzales@berkeley.edu)  Development of the web-server app Dator was
+ # based on an open source project by Bruce Wootton, with contributions from
+ # Kiet Lam (kiet.lam@berkeley.edu). The RC Input code was based on sample code
+ # from http://rcarduino.blogspot.com/2012/04/how-to-read-multiple-rc-channels-draft.html
+ # --------------------------------------------------------------------------- */
 
 
 /* ---------------------------------------------------------------------------
-WARNING:
-* Be sure to have all ultrasound sensors plugged in, otherwise the pins may get stuck in
-  some float voltage
-# --------------------------------------------------------------------------- */
+ WARNING:
+ * Be sure to have all ultrasound sensors plugged in, otherwise the pins may get stuck in
+ some float voltage
+ # --------------------------------------------------------------------------- */
 
 // include libraries
+//#define USE_USBCON
 #include <ros.h>
-#include <barc/Ultrasound.h>
-#include <barc/Encoder.h>
-#include <barc/ECU.h>
+#include <smartcar/Encoder.h>
+#include <smartcar/ECU_PWM.h>
 #include <Servo.h>
-#include "Maxbotix.h"
+//#include "Maxbotix.h"
 #include <EnableInterrupt.h>
 
-/**************************************************************************
-CAR CLASS DEFINITION (would like to refactor into car.cpp and car.h but can't figure out arduino build process so far)
-**************************************************************************/
+
 class Car {
-  public:
-    void initEncoders();
-    void initRCInput();
-    void initActuators();
-    void armActuators();
-    void writeToActuators(const barc::ECU& ecu);
-    // Used for copying variables shared with interrupts to avoid read/write
-    // conflicts later
-    void readAndCopyInputs();
-    // Getters
-    uint8_t getRCThrottle();
-    uint8_t getRCSteering();
-    int getEncoderFL();
-    int getEncoderFR();
-    int getEncoderBL();
-    int getEncoderBR();
-    // Interrupt service routines
-    void incFR();
-    void incFL();
-    void incBR();
-    void incBL();
-    void calcThrottle();
-    void calcSteering();
-  private:
-    // Pin assignments
-    const int ENC_FL_PIN = 2;
-    const int ENC_FR_PIN = 3;
-    const int ENC_BL_PIN = 5;
-    const int ENC_BR_PIN = 6;
-    const int THROTTLE_PIN = 7;
-    const int STEERING_PIN = 8;
-    const int MOTOR_PIN = 10;
-    const int SERVO_PIN= 11;
+public:
+  void initEncoders();
+  void initRCInput();
+  void initActuators();
+  void armActuators();
+  void writeToActuators(const smartcar::ECU_PWM& ecu);
+  // Used for copying variables shared with interrupts to avoid read/write
+  // conflicts later
+  void readAndCopyInputs();
+  // Getters
+  uint16_t getRCThrottle();
+  uint16_t getRCSteering();
+  int getEncoderFL();
+  int getEncoderFR();
+  int getEncoderBL();
+  int getEncoderBR();
+  // Interrupt service routines
+  void incFR();
+  void incFL();
+  void incBR();
+  void incBL();
+  void calcThrottle();
+  void calcSteering();
+private:
+  // Pin assignments
+  const int ENC_FL_PIN = 2;
+  const int ENC_FR_PIN = 3;
+  const int ENC_BL_PIN = 5;
+  const int ENC_BR_PIN = 6;
+  const int THROTTLE_PIN = 7;
+  const int STEERING_PIN = 8;
+  const int MOTOR_PIN = 10;
+  const int SERVO_PIN= 11;
 
-    // Car properties
-    // unclear what this is for
-    const int noAction = 0;
+  // Car properties
+  // unclear what this is for
+  const int noAction = 0;
 
-    // Motor limits
-    // TODO are these the real limits?
-    //This is original barc motor limits
-    //const int MOTOR_MAX = 120;
-    //const int MOTOR_MIN = 40;
-    //const int MOTOR_NEUTRAL = 90;
-    // Optional: smaller values for testing safety
-    /* const int MOTOR_MAX = 100; */
-    /* const int MOTOR_MIN = 75; */
+  // Motor limits
+  const int MOTOR_MAX = 1900;
+  const int MOTOR_MIN = 1100;
+  const int MOTOR_NEUTRAL = 1500;
+  // Optional: smaller values for testing safety
 
-    //This is 1/8 scale car motor limits
-    //NEURAL with brake
-    const int MOTOR_NEUTRAL = 1520;
-    //const int MOTOR_MAX = 2020;
-    //const int MOTOR_MIN = 1010;
-    //Optinal: below is test max and min for safety
-    const int MOTOR_MAX = 1720;
-    const int MOTOR_MIN = 1320;
-    // Steering limits
-    // TODO seems to me that the permissible steering range is really about [58,
-    // 120] judging from the sound of the servo pushing beyond a mechanical limit
-    // outside that range. The offset may be 2 or 3 deg and the d_theta_max is then
-    // ~31.
-    //This is original barc steering limits in pwm angle
-    //const int D_THETA_MAX = 30;
-    //const int THETA_CENTER = 90;
-    //const int THETA_MAX = THETA_CENTER + D_THETA_MAX;
-    //const int THETA_MIN = THETA_CENTER - D_THETA_MAX;
-    
-    //This is 1/8 scale car steering limits
-    const int D_THETA_MAX = 230;
-    const int THETA_CENTER = 1520;
-    const int THETA_MAX = THETA_CENTER + D_THETA_MAX;
-    const int THETA_MIN = THETA_CENTER - D_THETA_MAX;
+  // Steering limits
+  const int D_THETA_MAX = 400;
+  const int THETA_CENTER = 1500;
+  const int THETA_MAX = THETA_CENTER + D_THETA_MAX;
+  const int THETA_MIN = THETA_CENTER - D_THETA_MAX;
 
-    // Interfaces to motor and steering actuators
-    Servo motor;
-    Servo steering;
+  // Interfaces to motor and steering actuators
+  Servo motor;
+  Servo steering;
 
-    // Utility variables to handle RC and encoder inputs
-    volatile uint8_t updateFlagsShared;
-    uint8_t updateFlags;
-    const int THROTTLE_FLAG = 1;
-    const int STEERING_FLAG = 2;
-    const int FL_FLAG = 3;
-    const int FR_FLAG = 4;
-    const int BL_FLAG = 5;
-    const int BR_FLAG = 6;
+  // Utility variables to handle RC and encoder inputs
+  volatile uint8_t updateFlagsShared;
+  uint8_t updateFlags;
+  const int THROTTLE_FLAG = 1;
+  const int STEERING_FLAG = 2;
+  const int FL_FLAG = 3;
+  const int FR_FLAG = 4;
+  const int BL_FLAG = 5;
+  const int BR_FLAG = 6;
 
-    uint32_t throttleStart;
-    uint32_t steeringStart;
-    volatile uint16_t throttleInShared;
-    volatile uint16_t steeringInShared;
-    //This is original barc In value
-    uint16_t throttleIn = 1500;
-    uint16_t steeringIn = 1500;
-    
-    //On 1/8 scale car
-    //uint16_t throttleIn = 1530;
-    //uint16_t steeringIn = 1520;
-    //On 1/5 scale car
-    //uint16_t throttleIn = 1500;
-    //uint16_t steeringIn = 1470;
+  uint16_t throttleStart;
+  uint16_t steeringStart;
+  volatile uint16_t throttleInShared;
+  volatile uint16_t steeringInShared;
+  uint16_t throttleIn = 1500;
+  uint16_t steeringIn = 1500;
 
-    // Number of encoder counts on tires
-    // count tick on {FL, FR, BL, BR}
-    // F = front, B = back, L = left, R = right
-    volatile int FL_count_shared = 0;
-    volatile int FR_count_shared = 0;
-    volatile int BL_count_shared = 0;
-    volatile int BR_count_shared = 0;
-    int FL_count = 0;
-    int FR_count = 0;
-    int BL_count = 0;
-    int BR_count = 0;
+  // Number of encoder counts on tires
+  // count tick on {FL, FR, BL, BR}
+  // F = front, B = back, L = left, R = right
+  volatile int FL_count_shared = 0;
+  volatile int FR_count_shared = 0;
+  volatile int BL_count_shared = 0;
+  volatile int BR_count_shared = 0;
+  int FL_count = 0;
+  int FR_count = 0;
+  int BL_count = 0;
+  int BR_count = 0;
 
-    // Utility functions
-    uint8_t microseconds2PWM(uint16_t microseconds);
-    float saturateMotor(float x);
-    float saturateServo(float x);
+  // Utility functions
+  uint8_t microseconds2PWM(uint16_t microseconds);
+  float saturateMotor(int x);
+  float saturateServo(int x);
 };
 
 // Initialize an instance of the Car class as car
@@ -159,7 +126,7 @@ Car car;
 // These are really sad solutions to the fact that using class member functions
 // as callbacks is complicated in C++ and I haven't figured it out. If you can
 // figure it out, please atone for my sins.
-void ecuCallback(const barc::ECU& ecu) {
+void ecuCallback(const smartcar::ECU_PWM& ecu) {
   car.writeToActuators(ecu);
 }
 void incFLCallback() {
@@ -187,30 +154,29 @@ volatile unsigned long t0;
 
 // Global message variables
 // Encoder, RC Inputs, Electronic Control Unit, Ultrasound
-barc::ECU ecu;
-barc::ECU rc_inputs;
-barc::Encoder encoder;
-barc::Ultrasound ultrasound;
+smartcar::ECU_PWM ecu;
+smartcar::ECU_PWM rc_inputs;
+smartcar::Encoder encoder;
+
 
 ros::NodeHandle nh;
 
 ros::Publisher pub_encoder("encoder", &encoder);
 ros::Publisher pub_rc_inputs("rc_inputs", &rc_inputs);
-ros::Publisher pub_ultrasound("ultrasound", &ultrasound);
-ros::Subscriber<barc::ECU> sub_ecu("ecu_pwm", ecuCallback);
+ros::Subscriber<smartcar::ECU_PWM> sub_ecu("ecu_pwm", ecuCallback);
 
 
 // Set up ultrasound sensors
 /*
 Maxbotix us_fr(14, Maxbotix::PW, Maxbotix::LV); // front
-Maxbotix us_bk(15, Maxbotix::PW, Maxbotix::LV); // back
-Maxbotix us_rt(16, Maxbotix::PW, Maxbotix::LV); // right
-Maxbotix us_lt(17, Maxbotix::PW, Maxbotix::LV); // left
-*/
+ Maxbotix us_bk(15, Maxbotix::PW, Maxbotix::LV); // back
+ Maxbotix us_rt(16, Maxbotix::PW, Maxbotix::LV); // right
+ Maxbotix us_lt(17, Maxbotix::PW, Maxbotix::LV); // left
+ */
 
 /**************************************************************************
-ARDUINO INITIALIZATION
-**************************************************************************/
+ * ARDUINO INITIALIZATION
+ **************************************************************************/
 void setup()
 {
   // Set up encoders, rc input, and actuators
@@ -219,12 +185,12 @@ void setup()
   car.initActuators();
 
   // Start ROS node
+  nh.getHardware()->setBaud(57600);
   nh.initNode();
 
   // Publish and subscribe to topics
   nh.advertise(pub_encoder);
   nh.advertise(pub_rc_inputs);
-  nh.advertise(pub_ultrasound);
   nh.subscribe(sub_ecu);
 
   // Arming ESC, 1 sec delay for arming and ROS
@@ -235,8 +201,8 @@ void setup()
 
 
 /**************************************************************************
-ARDUINO MAIN lOOP
-**************************************************************************/
+ * ARDUINO MAIN lOOP
+ **************************************************************************/
 void loop() {
   // compute time elapsed (in ms)
   dt = millis() - t0;
@@ -259,11 +225,11 @@ void loop() {
     // publish ultra-sound measurement
     /*
     ultrasound.front = us_fr.getRange();
-    ultrasound.back = us_bk.getRange();
-    ultrasound.right = us_rt.getRange();
-    ultrasound.left = us_lt.getRange();
-    pub_ultrasound.publish(&ultrasound);
-    */
+     ultrasound.back = us_bk.getRange();
+     ultrasound.right = us_rt.getRange();
+     ultrasound.left = us_lt.getRange();
+     pub_ultrasound.publish(&ultrasound);
+     */
     t0 = millis();
   }
 
@@ -271,20 +237,23 @@ void loop() {
 }
 
 /**************************************************************************
-CAR CLASS IMPLEMENTATION
-**************************************************************************/
-float Car::saturateMotor(float x) {
-  if (x  == noAction ){ return MOTOR_NEUTRAL; }
+ * CAR CLASS IMPLEMENTATION
+ **************************************************************************/
+float Car::saturateMotor(int x) {
+  if (x  == noAction ){ 
+    return MOTOR_NEUTRAL; 
+  }
 
   if (x  >  MOTOR_MAX) {
     x = MOTOR_MAX;
-  } else if (x < MOTOR_MIN) {
+  } 
+  else if (x < MOTOR_MIN) {
     x = MOTOR_MIN;
   }
   return x;
 }
 
-float Car::saturateServo(float x) {
+float Car::saturateServo(int x) {
   if (x  == noAction ) {
     return THETA_CENTER;
   }
@@ -322,16 +291,18 @@ void Car::initActuators() {
 }
 
 void Car::armActuators() {
-  motor.write(MOTOR_NEUTRAL);
-  steering.write(THETA_CENTER);
+  motor.writeMicroseconds(MOTOR_NEUTRAL);
+  steering.writeMicroseconds(THETA_CENTER);
   delay(1000);
 }
 
-void Car::writeToActuators(const barc::ECU& ecu) {
-  float motorCMD = saturateMotor(ecu.motor);
-  float servoCMD = saturateServo(ecu.servo);
+void Car::writeToActuators(const smartcar::ECU_PWM& ecu) {
+
+  int motorCMD = ecu.motor;
+  int servoCMD = ecu.servo;
   motor.writeMicroseconds(motorCMD);
   steering.writeMicroseconds(servoCMD);
+
 }
 
 uint8_t Car::microseconds2PWM(uint16_t microseconds) {
@@ -344,7 +315,8 @@ void Car::calcThrottle() {
   if(digitalRead(THROTTLE_PIN) == HIGH) {
     // rising edge of the signal pulse, start timing
     throttleStart = micros();
-  } else {
+  } 
+  else {
     // falling edge, calculate duration of throttle pulse
     throttleInShared = (uint16_t)(micros() - throttleStart);
     // set the throttle flag to indicate that a new signal has been received
@@ -355,7 +327,8 @@ void Car::calcThrottle() {
 void Car::calcSteering() {
   if(digitalRead(STEERING_PIN) == HIGH) {
     steeringStart = micros();
-  } else {
+  } 
+  else {
     steeringInShared = (uint16_t)(micros() - steeringStart);
     updateFlagsShared |= STEERING_FLAG;
   }
@@ -415,11 +388,13 @@ void Car::readAndCopyInputs() {
   }
 }
 
-uint8_t Car::getRCThrottle() {
-  return microseconds2PWM(throttleIn);
+uint16_t Car::getRCThrottle() {
+  return throttleIn;
+//return microseconds2PWM(throttleIn);
 }
-uint8_t Car::getRCSteering() {
-  return microseconds2PWM(steeringIn);
+uint16_t Car::getRCSteering() {
+  return steeringIn;
+//return microseconds2PWM(steeringIn);
 }
 
 int Car::getEncoderFL() {
@@ -434,3 +409,4 @@ int Car::getEncoderBL() {
 int Car::getEncoderBR() {
   return BR_count;
 }
+
